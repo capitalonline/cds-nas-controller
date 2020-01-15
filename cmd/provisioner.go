@@ -24,7 +24,7 @@ const (
 	defaultProvisioner = "cds/nas"
 )
 
-type nfsProvisioner struct {
+type nasProvisioner struct {
 	client kubernetes.Interface
 }
 
@@ -32,9 +32,9 @@ const (
 	mountPath = "/persistentvolumes"
 )
 
-var _ controller.Provisioner = &nfsProvisioner{}
+var _ controller.Provisioner = &nasProvisioner{}
 
-func (p *nfsProvisioner) Provision(options controller.ProvisionOptions) (*v1.PersistentVolume, error) {
+func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.PersistentVolume, error) {
 	if options.PVC.Spec.Selector != nil {
 		return nil, fmt.Errorf("claim Selector is not supported")
 	}
@@ -110,7 +110,7 @@ func (p *nfsProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	return pv, nil
 }
 
-func (p *nfsProvisioner) Delete(volume *v1.PersistentVolume) error {
+func (p *nasProvisioner) Delete(volume *v1.PersistentVolume) error {
 	path := volume.Spec.PersistentVolumeSource.NFS.Path
 	pvName := filepath.Base(path)
 	oldPath := filepath.Join(mountPath, pvName)
@@ -144,7 +144,7 @@ func (p *nfsProvisioner) Delete(volume *v1.PersistentVolume) error {
 }
 
 // getClassForVolume returns StorageClass
-func (p *nfsProvisioner) getClassForVolume(pv *v1.PersistentVolume) (*storage.StorageClass, error) {
+func (p *nasProvisioner) getClassForVolume(pv *v1.PersistentVolume) (*storage.StorageClass, error) {
 	if p.client == nil {
 		return nil, fmt.Errorf("cannot get kube client")
 	}
@@ -200,11 +200,11 @@ func main() {
 		klog.Fatalf("Error getting server version: %v", err)
 	}
 
-	clientNFSProvisioner := &nfsProvisioner{
+	clientNasProvisioner := &nasProvisioner{
 		client: clientset,
 	}
 	// Start the provision controller which will dynamically provision efs NFS
 	// PVs
-	pc := controller.NewProvisionController(clientset, provisionerName, clientNFSProvisioner, serverVersion.GitVersion)
+	pc := controller.NewProvisionController(clientset, provisionerName, clientNasProvisioner, serverVersion.GitVersion)
 	pc.Run(wait.NeverStop)
 }

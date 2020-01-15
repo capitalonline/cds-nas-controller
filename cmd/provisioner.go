@@ -22,6 +22,8 @@ import (
 const (
 	provisionerNameKey = "PROVISIONER_NAME"
 	defaultProvisioner = "cds/nas"
+	driverType = "flexvolume"
+	driverName = "cds/nas"
 )
 
 type nasProvisioner struct {
@@ -62,8 +64,7 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 		nasServerPath = "/"
 	}
 	// use flexvolume driver
-	if options.StorageClass.Provisioner == defaultProvisioner {
-
+	if options.StorageClass.Parameters["driver"] ==  driverType {
 		flexNasVers, ok := options.StorageClass.Parameters["vers"]
 		if !ok {
 			flexNasVers = "4"
@@ -73,7 +74,7 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 			flexNasOptions = "noresvport"
 		}
 		pvs.FlexVolume = &v1.FlexPersistentVolumeSource{
-			Driver:   defaultProvisioner,
+			Driver:   driverName,
 			ReadOnly: false,
 			Options: map[string]string{
 				"server":  nasServer,
@@ -178,6 +179,7 @@ func main() {
 	provisionerName := os.Getenv(provisionerNameKey)
 	if provisionerName == "" {
 		klog.Infof("env %s is empty, use default value: %s", provisionerNameKey, defaultProvisioner)
+		provisionerName = defaultProvisioner
 	} else {
 		klog.Infof("provisioner name is %s", provisionerName)
 	}

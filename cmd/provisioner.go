@@ -48,7 +48,9 @@ func (p *nfsProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	if err := os.MkdirAll(fullPath, 0777); err != nil {
 		return nil, errors.New("unable to create directory to provision new pv: " + err.Error())
 	}
-	os.Chmod(fullPath, 0777)
+	if err := os.Chmod(fullPath, 0777); err != nil {
+		klog.Errorf("Failed to change mode of directory %s to 0777", fullPath)
+	}
 
 	pvs := v1.PersistentVolumeSource{}
 	nasServer, ok := options.StorageClass.Parameters["server"]
@@ -64,11 +66,11 @@ func (p *nfsProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 
 		flexNasVers, ok := options.StorageClass.Parameters["vers"]
 		if !ok {
-			flexNasVers = "3"
+			flexNasVers = "4"
 		}
 		flexNasOptions, ok := options.StorageClass.Parameters["options"]
 		if !ok {
-			flexNasOptions = "nolock,tcp,noresvport"
+			flexNasOptions = "noresvport"
 		}
 		pvs.FlexVolume = &v1.FlexPersistentVolumeSource{
 			Driver:   defaultProvisioner,
@@ -144,11 +146,11 @@ func (p *nfsProvisioner) Delete(volume *v1.PersistentVolume) error {
 // getClassForVolume returns StorageClass
 func (p *nfsProvisioner) getClassForVolume(pv *v1.PersistentVolume) (*storage.StorageClass, error) {
 	if p.client == nil {
-		return nil, fmt.Errorf("Cannot get kube client")
+		return nil, fmt.Errorf("cannot get kube client")
 	}
 	className := GetPersistentVolumeClass(pv)
 	if className == "" {
-		return nil, fmt.Errorf("Volume has no storage class")
+		return nil, fmt.Errorf("volume has no storage class")
 	}
 	class, err := p.client.StorageV1().StorageClasses().Get(className, metav1.GetOptions{})
 	if err != nil {
@@ -169,7 +171,9 @@ func GetPersistentVolumeClass(volume *v1.PersistentVolume) string {
 
 func main() {
 	flag.Parse()
-	flag.Set("logtostderr", "true")
+	if err := flag.Set("logtostderr", "true"); err != nil {
+		klog.Error("failed to set logtostderr")
+	}
 
 	provisionerName := os.Getenv(provisionerNameKey)
 	if provisionerName == "" {

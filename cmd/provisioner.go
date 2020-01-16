@@ -60,7 +60,7 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	}
 	nasServerPath, ok := options.StorageClass.Parameters["path"]
 	if !ok {
-		nasServerPath = "/"
+		nasServerPath = "/nfsshare"
 	}
 
 	flexNasVers, ok := options.StorageClass.Parameters["vers"]

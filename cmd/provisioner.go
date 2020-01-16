@@ -22,7 +22,6 @@ import (
 const (
 	provisionerNameKey = "PROVISIONER_NAME"
 	defaultProvisioner = "cds/nas"
-	driverType = "flexvolume"
 	driverName = "cds/nas"
 )
 
@@ -40,7 +39,7 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	if options.PVC.Spec.Selector != nil {
 		return nil, fmt.Errorf("claim Selector is not supported")
 	}
-	klog.V(4).Infof("nfs provisioner: VolumeOptions %+v", options)
+	klog.V(4).Infof("nas provisioner: VolumeOptions %+v", options)
 
 	pvcNamespace := options.PVC.Namespace
 	pvcName := options.PVC.Name
@@ -63,34 +62,25 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	if !ok {
 		nasServerPath = "/"
 	}
-	// use flexvolume driver
-	if options.StorageClass.Parameters["driver"] ==  driverType {
-		flexNasVers, ok := options.StorageClass.Parameters["vers"]
-		if !ok {
-			flexNasVers = "4"
-		}
-		flexNasOptions, ok := options.StorageClass.Parameters["options"]
-		if !ok {
-			flexNasOptions = "noresvport"
-		}
-		pvs.FlexVolume = &v1.FlexPersistentVolumeSource{
-			Driver:   driverName,
-			ReadOnly: false,
-			Options: map[string]string{
-				"server":  nasServer,
-				"path":    filepath.Join(nasServerPath, pvName),
-				"vers":    flexNasVers,
-				"mode":    options.StorageClass.Parameters["mode"],
-				"options": flexNasOptions,
-			},
-		}
-	} else {
-		// use nfs driver
-		pvs.NFS = &v1.NFSVolumeSource{
-			Server:   nasServer,
-			Path:     nasServerPath,
-			ReadOnly: false,
-		}
+
+	flexNasVers, ok := options.StorageClass.Parameters["vers"]
+	if !ok {
+		flexNasVers = "4.0"
+	}
+	flexNasOptions, ok := options.StorageClass.Parameters["options"]
+	if !ok {
+		flexNasOptions = "noresvport"
+	}
+	pvs.FlexVolume = &v1.FlexPersistentVolumeSource{
+		Driver:   driverName,
+		ReadOnly: false,
+		Options: map[string]string{
+			"server":  nasServer,
+			"path":    filepath.Join(nasServerPath, pvName),
+			"vers":    flexNasVers,
+			"mode":    options.StorageClass.Parameters["mode"],
+			"options": flexNasOptions,
+		},
 	}
 
 	// create PersistentVolume object
@@ -112,7 +102,7 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 }
 
 func (p *nasProvisioner) Delete(volume *v1.PersistentVolume) error {
-	path := volume.Spec.PersistentVolumeSource.NFS.Path
+	path := volume.Spec.PersistentVolumeSource.FlexVolume.Options["path"]
 	pvName := filepath.Base(path)
 	oldPath := filepath.Join(mountPath, pvName)
 	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
@@ -205,8 +195,7 @@ func main() {
 	clientNasProvisioner := &nasProvisioner{
 		client: clientset,
 	}
-	// Start the provision controller which will dynamically provision efs NFS
-	// PVs
+	// Start the provision controller which will dynamically provision Nas PVs
 	pc := controller.NewProvisionController(clientset, provisionerName, clientNasProvisioner, serverVersion.GitVersion)
 	pc.Run(wait.NeverStop)
 }

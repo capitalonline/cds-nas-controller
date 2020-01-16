@@ -39,13 +39,13 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	if options.PVC.Spec.Selector != nil {
 		return nil, fmt.Errorf("claim Selector is not supported")
 	}
-	klog.V(4).Infof("nas provisioner: VolumeOptions %+v", options)
+	klog.Infof("nas provisioner: VolumeOptions %+v", options)
 
 	pvcNamespace := options.PVC.Namespace
 	pvcName := options.PVC.Name
 	pvName := strings.Join([]string{pvcNamespace, pvcName, options.PVName}, "-")
 	fullPath := filepath.Join(mountPath, pvName)
-	klog.V(4).Infof("creating path %s", fullPath)
+	klog.Infof("creating path %s", fullPath)
 	if err := os.MkdirAll(fullPath, 0777); err != nil {
 		return nil, errors.New("unable to create directory to provision new pv: " + err.Error())
 	}
@@ -105,6 +105,7 @@ func (p *nasProvisioner) Delete(volume *v1.PersistentVolume) error {
 	path := volume.Spec.PersistentVolumeSource.FlexVolume.Options["path"]
 	pvName := filepath.Base(path)
 	oldPath := filepath.Join(mountPath, pvName)
+	klog.Infof("deleting pv %s on path %s(flexvolume path parameter: %s)", pvName, oldPath, path)
 	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
 		klog.Warningf("path %s does not exist, deletion skipped", oldPath)
 		return nil
@@ -112,6 +113,7 @@ func (p *nasProvisioner) Delete(volume *v1.PersistentVolume) error {
 	// Get the storage class for this volume.
 	storageClass, err := p.getClassForVolume(volume)
 	if err != nil {
+		klog.Errorf("failed to get storage class from volume %s: %s", volume.Name, err)
 		return err
 	}
 	// Determine if the "archiveOnDelete" parameter exists.
@@ -129,9 +131,8 @@ func (p *nasProvisioner) Delete(volume *v1.PersistentVolume) error {
 	}
 
 	archivePath := filepath.Join(mountPath, "archived-"+pvName)
-	klog.V(4).Infof("archiving path %s to %s", oldPath, archivePath)
+	klog.Infof("archiving path %s to %s", oldPath, archivePath)
 	return os.Rename(oldPath, archivePath)
-
 }
 
 // getClassForVolume returns StorageClass
@@ -162,17 +163,12 @@ func GetPersistentVolumeClass(volume *v1.PersistentVolume) string {
 
 func main() {
 	flag.Parse()
-	if err := flag.Set("logtostderr", "true"); err != nil {
-		klog.Error("failed to set logtostderr")
-	}
-
 	provisionerName := os.Getenv(provisionerNameKey)
 	if provisionerName == "" {
 		klog.Infof("env %s is empty, use default value: %s", provisionerNameKey, defaultProvisioner)
 		provisionerName = defaultProvisioner
-	} else {
-		klog.Infof("provisioner name is %s", provisionerName)
 	}
+	klog.Infof("starting provisioner with name %s", provisionerName)
 
 	// Create an InClusterConfig and use it to create a client for the controller
 	// to use to communicate with Kubernetes

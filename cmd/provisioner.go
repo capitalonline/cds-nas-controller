@@ -21,6 +21,7 @@ const (
 	provisionerNameKey = "PROVISIONER_NAME"
 	defaultProvisioner = "cds/nas"
 	driverName = "cds/nas"
+	version = "v0.1"
 )
 
 type nasProvisioner struct {
@@ -33,7 +34,7 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	if options.PVC.Spec.Selector != nil {
 		return nil, fmt.Errorf("claim Selector is not supported")
 	}
-	klog.Infof("nas provisioner: VolumeOptions %+v", options)
+	klog.Infof("nas provisioner ver:%s, VolumeOptions %+v", version, options)
 
 	pvcNamespace := options.PVC.Namespace
 	pvcName := options.PVC.Name

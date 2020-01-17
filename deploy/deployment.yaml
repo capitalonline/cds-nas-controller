@@ -1,0 +1,45 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: cds-nas-controller
+  namespace: kube-system
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cds-nas-controller
+  template:
+    metadata:
+      labels:
+        app: cds-nas-controller
+    spec:
+      tolerations:
+        - operator: Exists
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              preference:
+                matchExpressions:
+                  - key: node-role.kubernetes.io/master
+                    operator: Exists
+      priorityClassName: system-node-critical
+      serviceAccount: cds-provisioner
+      hostNetwork: true
+      containers:
+        - name: cds-nas-provisioner
+          image: registry-bj.capitalonline.net/cck/cds-nas-controller:v0.1
+          imagePullPolicy: Always
+          env:
+            - name: PROVISIONER_NAME
+              value: cds/nas
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /var/log
+              name: log
+      volumes:
+        - hostPath:
+            path: /var/log
+          name: log

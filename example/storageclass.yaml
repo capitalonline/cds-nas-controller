@@ -1,0 +1,8 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: cds-nas-sc
+provisioner: cds/nas
+reclaimPolicy: Delete
+parameters:
+  server: <nas mount point>

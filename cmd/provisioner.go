@@ -45,15 +45,21 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	if !ok {
 		return nil, errors.New("server must be provided in the storage class parameters")
 	}
-	nasServerPath, ok := options.StorageClass.Parameters["path"]
-	if !ok {
-		nasServerPath = "/nfsshare"
-	}
 
 	flexNasVers, ok := options.StorageClass.Parameters["vers"]
 	if !ok {
 		flexNasVers = "4.0"
 	}
+	nasServerPath, ok := options.StorageClass.Parameters["path"]
+	if !ok {
+		// NFSv4 supports pseudo-file system, we can use "/" here as "fsid=0" is set on the server side
+		if strings.HasPrefix(flexNasVers, "4"){
+			nasServerPath = "/"
+		}else{
+			nasServerPath = "/nfsshare"
+		}
+	}
+
 	flexNasOptions, ok := options.StorageClass.Parameters["options"]
 	if !ok {
 		flexNasOptions = "noresvport"

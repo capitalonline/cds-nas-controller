@@ -5,11 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
-	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	core "k8s.io/api/core/v1"
+	storage "k8s.io/api/storage/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -20,8 +23,9 @@ import (
 const (
 	provisionerNameKey = "PROVISIONER_NAME"
 	defaultProvisioner = "cds/nas"
-	driverName = "cds/nas"
-	version = "v0.1"
+	driverName         = "cds/nas"
+	mountPath          = "/persistentvolumes"
+	version            = "v0.1"
 )
 
 type nasProvisioner struct {
@@ -30,7 +34,7 @@ type nasProvisioner struct {
 
 var _ controller.Provisioner = &nasProvisioner{}
 
-func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.PersistentVolume, error) {
+func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*core.PersistentVolume, error) {
 	if options.PVC.Spec.Selector != nil {
 		return nil, fmt.Errorf("claim Selector is not supported")
 	}
@@ -38,9 +42,9 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 
 	pvcNamespace := options.PVC.Namespace
 	pvcName := options.PVC.Name
-	pvName := strings.Join([]string{pvcNamespace, pvcName, options.PVName}, "-")
+	pvDirectoryName := strings.Join([]string{pvcNamespace, pvcName, options.PVName}, "-")
 
-	pvs := v1.PersistentVolumeSource{}
+	pvs := core.PersistentVolumeSource{}
 	nasServer, ok := options.StorageClass.Parameters["server"]
 	if !ok {
 		return nil, errors.New("server must be provided in the storage class parameters")
@@ -53,9 +57,9 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	nasServerPath, ok := options.StorageClass.Parameters["path"]
 	if !ok {
 		// NFSv4 supports pseudo-file system, we can use "/" here as "fsid=0" is set on the server side
-		if strings.HasPrefix(flexNasVers, "4"){
+		if strings.HasPrefix(flexNasVers, "4") {
 			nasServerPath = "/"
-		}else{
+		} else {
 			nasServerPath = "/nfsshare"
 		}
 	}
@@ -64,12 +68,12 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	if !ok {
 		flexNasOptions = "noresvport"
 	}
-	pvs.FlexVolume = &v1.FlexPersistentVolumeSource{
+	pvs.FlexVolume = &core.FlexPersistentVolumeSource{
 		Driver:   driverName,
 		ReadOnly: false,
 		Options: map[string]string{
 			"server":  nasServer,
-			"path":    filepath.Join(nasServerPath, pvName),
+			"path":    filepath.Join(nasServerPath, pvDirectoryName),
 			"vers":    flexNasVers,
 			"mode":    options.StorageClass.Parameters["mode"],
 			"options": flexNasOptions,
@@ -77,16 +81,16 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	}
 
 	// create PersistentVolume object
-	pv := &v1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
+	pv := &core.PersistentVolume{
+		ObjectMeta: meta.ObjectMeta{
 			Name: options.PVName,
 		},
-		Spec: v1.PersistentVolumeSpec{
+		Spec: core.PersistentVolumeSpec{
 			PersistentVolumeReclaimPolicy: *options.StorageClass.ReclaimPolicy,
 			AccessModes:                   options.PVC.Spec.AccessModes,
 			MountOptions:                  options.StorageClass.MountOptions,
-			Capacity: v1.ResourceList{
-				v1.ResourceStorage: options.PVC.Spec.Resources.Requests[v1.ResourceStorage],
+			Capacity: core.ResourceList{
+				core.ResourceStorage: options.PVC.Spec.Resources.Requests[core.ResourceStorage],
 			},
 			PersistentVolumeSource: pvs,
 		},
@@ -94,11 +98,101 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*v1.Per
 	return pv, nil
 }
 
-func (p *nasProvisioner) Delete(volume *v1.PersistentVolume) error {
-	klog.Infof("persistent volume delete is called: %+v", volume)
-	return nil
+func (p *nasProvisioner) Delete(pv *core.PersistentVolume) error {
+	nasServer := pv.Spec.PersistentVolumeSource.FlexVolume.Options["server"]
+	nasVers := pv.Spec.PersistentVolumeSource.FlexVolume.Options["vers"]
+	pvPath := pv.Spec.PersistentVolumeSource.FlexVolume.Options["path"]
+	if pvPath == "/" || pvPath == "" {
+		klog.Errorf("deleteVolume: pvPath cannot be / or empty")
+		return errors.New("pvPath cannot be / or empty")
+	}
+	pvDirectoryName := filepath.Base(pvPath)
+	nasPath := getNasPathFromPvPath(pvPath)
+	oldPath := filepath.Join(mountPath, pvDirectoryName)
+
+	mntCmd := fmt.Sprintf("mount -t nfs -o vers=%s %s:%s %s", nasVers, nasServer, nasPath, mountPath)
+	if _, err := runCmd(mntCmd); err != nil {
+		klog.Errorf("mount nas directory fail: %s", err.Error())
+		return fmt.Errorf("mount directory fail: %s", err.Error())
+	}
+	defer func() {
+		if _, err := runCmd("umount " + mountPath); err != nil {
+			klog.Errorf("unmount directory fail: %s", err.Error())
+		}
+	}()
+
+	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
+		klog.Warningf("path %s does not exist, deletion skipped", oldPath)
+		return nil
+	}
+
+	// Get the storage class for this volume.
+	storageClass, err := p.getClassForVolume(pv)
+	if err != nil {
+		klog.Errorf("failed to get storage class from volume %s: %s", pv.Name, err)
+		return err
+	}
+	// Determine if the "archiveOnDelete" parameter exists.
+	// If it exists and has a false value, delete the directory.
+	// Otherwise, archive it.
+	archiveOnDelete, exists := storageClass.Parameters["archiveOnDelete"]
+	if exists {
+		archiveBool, err := strconv.ParseBool(archiveOnDelete)
+		if err != nil {
+			return err
+		}
+		if !archiveBool {
+			return os.RemoveAll(oldPath)
+		}
+	}
+
+	archivePath := filepath.Join(mountPath, "archived-"+pvDirectoryName)
+	klog.Infof("archiving path %s to %s", oldPath, archivePath)
+	return os.Rename(oldPath, archivePath)
 }
 
+// getClassForVolume returns StorageClass
+func (p *nasProvisioner) getClassForVolume(pv *core.PersistentVolume) (*storage.StorageClass, error) {
+	if p.client == nil {
+		return nil, fmt.Errorf("cannot get kube client")
+	}
+	//className := GetPersistentVolumeClass(pv)
+
+	className := pv.Spec.StorageClassName
+	// Use beta annotation first
+	if classNameFromAnnotation, found := pv.Annotations[core.BetaStorageClassAnnotation]; found {
+		className = classNameFromAnnotation
+	}
+	if className == "" {
+		return nil, fmt.Errorf("volume has no storage class")
+	}
+	class, err := p.client.StorageV1().StorageClasses().Get(className, meta.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return class, nil
+}
+
+func getNasPathFromPvPath(pvPath string) (nasPath string) {
+	tmpPath := pvPath
+	if strings.HasSuffix(pvPath, "/") {
+		tmpPath = pvPath[0 : len(pvPath)-1]
+	}
+	pos := strings.LastIndex(tmpPath, "/")
+	nasPath = pvPath[0:pos]
+	if nasPath == "" {
+		nasPath = "/"
+	}
+	return
+}
+
+func runCmd(cmd string) (string, error) {
+	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("Failed to run cmd: " + cmd + ", with out: " + string(out) + ", with error: " + err.Error())
+	}
+	return string(out), nil
+}
 
 func main() {
 	flag.Parse()
@@ -127,6 +221,10 @@ func main() {
 		klog.Fatalf("Error getting server version: %v", err)
 	}
 
+	// trying to mkdir of mountPath if there isn't any
+	if err := os.MkdirAll(mountPath, 0777); err != nil {
+		klog.Fatalf("unable to create default mountPath directory: " + err.Error())
+	}
 	clientNasProvisioner := &nasProvisioner{
 		client: clientset,
 	}

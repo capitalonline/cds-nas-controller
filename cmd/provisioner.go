@@ -26,6 +26,10 @@ const (
 	driverName         = "cds/nas"
 	mountPath          = "/persistentvolumes"
 	version            = "v0.1"
+	defaultV3Path      = "/nfsshare"
+	defaultV4Path      = "/"
+	defaultV3Opts      = "noresvport,nolock,tcp"
+	defaultV4Opts      = "noresvport"
 )
 
 type nasProvisioner struct {
@@ -53,20 +57,32 @@ func (p *nasProvisioner) Provision(options controller.ProvisionOptions) (*core.P
 	flexNasVers, ok := options.StorageClass.Parameters["vers"]
 	if !ok {
 		flexNasVers = "4.0"
+	} else if strings.HasPrefix(flexNasVers, "3") {
+		// ony vers=3 is supported
+		flexNasVers = "3"
+	}
+
+	nfsV4 := false
+	if strings.HasPrefix(flexNasVers, "4") {
+		nfsV4 = true
 	}
 	nasServerPath, ok := options.StorageClass.Parameters["path"]
 	if !ok {
 		// NFSv4 supports pseudo-file system, we can use "/" here as "fsid=0" is set on the server side
-		if strings.HasPrefix(flexNasVers, "4") {
-			nasServerPath = "/"
+		if nfsV4 {
+			nasServerPath = defaultV4Path
 		} else {
-			nasServerPath = "/nfsshare"
+			nasServerPath = defaultV3Path
 		}
 	}
 
 	flexNasOptions, ok := options.StorageClass.Parameters["options"]
 	if !ok {
-		flexNasOptions = "noresvport"
+		if nfsV4 {
+			flexNasOptions = defaultV4Opts
+		} else {
+			flexNasOptions = defaultV3Opts
+		}
 	}
 	pvs.FlexVolume = &core.FlexPersistentVolumeSource{
 		Driver:   driverName,

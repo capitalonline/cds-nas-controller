@@ -213,7 +213,7 @@ func getNasPathFromPvPath(pvPath string) (nasPath string) {
 func runCmd(cmd string) (string, error) {
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to run cmd:%s; Output: %s; Error: %s",cmd, string(out), err.Error())
+		return "", fmt.Errorf("failed to run cmd:%s; Output: %s; Error: %s", cmd, string(out), err.Error())
 	}
 	return string(out), nil
 }

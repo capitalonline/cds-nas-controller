@@ -7,9 +7,9 @@ spec:
     - name: "nginx-flexvolume-nas-pvc"
       image: "tutum/hello-world"
       volumeMounts:
-          - name: pvc-nas
-            mountPath: "/data"
+        - name: pvc-nas
+          mountPath: "/data"
   volumes:
-  - name: pvc-nas
-    persistentVolumeClaim:
+    - name: pvc-nas
+      persistentVolumeClaim:
         claimName: mynaspvc

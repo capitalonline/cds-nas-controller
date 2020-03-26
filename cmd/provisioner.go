@@ -25,7 +25,7 @@ const (
 	defaultProvisioner = "cds/nas"
 	driverName         = "cds/nas"
 	mountPath          = "/persistentvolumes"
-	version            = "v0.1"
+	version            = "v0.2.0"
 	defaultV3Path      = "/nfsshare"
 	defaultV4Path      = "/"
 	defaultV3Opts      = "noresvport,nolock,tcp"

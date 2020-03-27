@@ -25,7 +25,7 @@ const (
 	defaultProvisioner = "cds/nas"
 	driverName         = "cds/nas"
 	mountPath          = "/persistentvolumes"
-	version            = "v0.1"
+	version            = "v0.2.0"
 	defaultV3Path      = "/nfsshare"
 	defaultV4Path      = "/"
 	defaultV3Opts      = "noresvport,nolock,tcp"
@@ -128,12 +128,20 @@ func (p *nasProvisioner) Delete(pv *core.PersistentVolume) error {
 
 	mntCmd := fmt.Sprintf("mount -t nfs -o vers=%s %s:%s %s", nasVers, nasServer, nasPath, mountPath)
 	if _, err := runCmd(mntCmd); err != nil {
-		klog.Errorf("mount nas directory fail: %s", err.Error())
-		return fmt.Errorf("mount directory fail: %s", err.Error())
+		klog.Errorf("mount nas directory failed: %s", err.Error())
+		if _, err := runCmd("df -P | grep -iF " + mountPath); err != nil {
+			klog.Error("the directory is not mounted, while the mount failed")
+			return fmt.Errorf("mount directory failed: %s", err.Error())
+		}
+		klog.Warning("The directory is somehow already mounted, skip the mount")
 	}
 	defer func() {
 		if _, err := runCmd("umount " + mountPath); err != nil {
-			klog.Errorf("unmount directory fail: %s", err.Error())
+			klog.Errorf("unmount directory failed: %s", err.Error())
+			klog.Info("trying to do a force unmount")
+			if _, err := runCmd("umount -f " + mountPath); err != nil {
+				klog.Errorf("force unmount directory failed: %s", err.Error())
+			}
 		}
 	}()
 
@@ -205,7 +213,7 @@ func getNasPathFromPvPath(pvPath string) (nasPath string) {
 func runCmd(cmd string) (string, error) {
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("Failed to run cmd: " + cmd + ", with out: " + string(out) + ", with error: " + err.Error())
+		return "", fmt.Errorf("failed to run cmd:%s; Output: %s; Error: %s", cmd, string(out), err.Error())
 	}
 	return string(out), nil
 }

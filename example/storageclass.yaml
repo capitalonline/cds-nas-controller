@@ -5,4 +5,8 @@ metadata:
 provisioner: cds/nas
 reclaimPolicy: Delete
 parameters:
-  server: <nas mount point>
+  servers: 1.2.3.4/nfsshare, 1.2.3.5/nfsshare
+  #server: 1.2.3.4
+  #path: /nfsshare
+  vers: "4.1"
+  archiveOnDelete: "true"
